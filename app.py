@@ -98,50 +98,100 @@ class PositionalEncoding(nn.Module):
 
 
 class EncoderLayer(nn.Module):
-    def __init__(self, d_model, num_heads, d_ff, dropout=0.1):
-        super(EncoderLayer, self).__init__()
-        self.self_attn = MultiHeadAttention(d_model, num_heads, dropout)
+    def __init__(self, d_model: int, h: int, d_ff: int, dropout: float = 0.1):
+        """
+        Args:
+            d_model (int): The dimension of the embedding.
+            h (int): The number of attention heads.
+            d_ff (int): The dimension of the feed-forward network.
+            dropout (float): The dropout probability.
+        """
+        super().__init__()
+        self.self_attn = MultiHeadAttention(d_model, h, dropout)
         self.feed_forward = nn.Sequential(
             nn.Linear(d_model, d_ff),
             nn.ReLU(),
+            nn.Dropout(dropout),
             nn.Linear(d_ff, d_model)
         )
         self.norm1 = nn.LayerNorm(d_model)
         self.norm2 = nn.LayerNorm(d_model)
         self.dropout = nn.Dropout(dropout)
-
-    def forward(self, x, mask=None):
+        
+    def forward(self, x: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            x (torch.Tensor): The input tensor from the previous layer.
+            mask (torch.Tensor): The mask for the input sequence.
+        
+        Returns:
+            torch.Tensor: The output tensor of the encoder layer.
+        """
+        # --- First sub-layer: Multi-Head Self-Attention ---
+        # The query, key, and value are all the same: the input 'x'. This is "self-attention".
         attn_output = self.self_attn(q=x, k=x, v=x, mask=mask)
+        
+        # Apply the first residual connection ("Add") and Layer Normalization ("Norm")
         x = self.norm1(x + self.dropout(attn_output))
+        
+        # --- Second sub-layer: Feed-Forward Network ---
         ff_output = self.feed_forward(x)
+        
+        # Apply the second residual connection and Layer Normalization
         x = self.norm2(x + self.dropout(ff_output))
+        
         return x
 
 
 class DecoderLayer(nn.Module):
-    def __init__(self, d_model, num_heads, d_ff, dropout=0.1):
-        super(DecoderLayer, self).__init__()
-        self.self_attn = MultiHeadAttention(d_model, num_heads, dropout)
-        self.cross_attn = MultiHeadAttention(d_model, num_heads, dropout)
+    def __init__(self, d_model: int, h: int, d_ff: int, dropout: float = 0.1):
+        """
+        Args:
+            d_model (int): The dimension of the embedding.
+            h (int): The number of attention heads.
+            d_ff (int): The dimension of the feed-forward network.
+            dropout (float): The dropout probability.
+        """
+        super().__init__()
+        self.self_attn = MultiHeadAttention(d_model, h, dropout)
+        self.cross_attn = MultiHeadAttention(d_model, h, dropout)
         self.feed_forward = nn.Sequential(
             nn.Linear(d_model, d_ff),
             nn.ReLU(),
+            nn.Dropout(dropout),
             nn.Linear(d_ff, d_model)
         )
         self.norm1 = nn.LayerNorm(d_model)
         self.norm2 = nn.LayerNorm(d_model)
         self.norm3 = nn.LayerNorm(d_model)
         self.dropout = nn.Dropout(dropout)
-
-    def forward(self, x, encoder_output, source_mask=None, target_mask=None):
+        
+    def forward(self, x: torch.Tensor, encoder_output: torch.Tensor, 
+                source_mask: torch.Tensor, target_mask: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            x (torch.Tensor): The input from the previous decoder layer.
+            encoder_output (torch.Tensor): The final output of the encoder stack.
+            source_mask (torch.Tensor): The mask for the encoder output.
+            target_mask (torch.Tensor): The mask for the decoder input.
+        
+        Returns:
+            torch.Tensor: The output tensor of the decoder layer.
+        """
+        # --- First sub-layer: Masked Multi-Head Self-Attention ---
         attn_output = self.self_attn(q=x, k=x, v=x, mask=target_mask)
         x = self.norm1(x + self.dropout(attn_output))
+        
+        # --- Second sub-layer: Encoder-Decoder Cross-Attention ---
+        # Query comes from the decoder, Key and Value come from the encoder.
         attn_output = self.cross_attn(q=x, k=encoder_output, v=encoder_output, mask=source_mask)
         x = self.norm2(x + self.dropout(attn_output))
+
+        # --- Third sub-layer: Feed-Forward Network ---
         ff_output = self.feed_forward(x)
         x = self.norm3(x + self.dropout(ff_output))
+        
         return x
-
 
 class Transformer(nn.Module):
     def __init__(self, vocab_size, d_model, num_encoder_layers, num_decoder_layers, 
